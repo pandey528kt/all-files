@@ -41,15 +41,17 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState("");
+  const [storageReady, setStorageReady] = useState<boolean | null>(null);
 
   async function refreshLibrary() {
     setLoading(true);
     try {
       const response = await fetch("/api/library", { cache: "no-store" });
       if (!response.ok) throw new Error(await responseError(response, "The shared library could not be loaded."));
-      const data = await response.json() as { files: SharedFile[]; folders: FolderItem[] };
+      const data = await response.json() as { files: SharedFile[]; folders: FolderItem[]; storageReady: boolean };
       setFiles(data.files);
       setFolders(data.folders);
+      setStorageReady(data.storageReady);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The shared library could not be loaded. Refresh to try again.");
     } finally {
@@ -61,6 +63,10 @@ export default function Home() {
 
   async function addFiles(incoming: FileList | null) {
     if (!incoming?.length || uploading) return;
+    if (storageReady === false) {
+      setNotice("Shared uploads need the site owner to configure Cloudflare R2 storage first.");
+      return;
+    }
     const selected = Array.from(incoming);
     const accepted = selected.filter((file) => file.size > 0 && file.size <= MAX_FILE_SIZE);
     const rejected = selected.length - accepted.length;
@@ -96,7 +102,7 @@ export default function Home() {
     }
     setUploading("");
     await refreshLibrary();
-    if (failures.length) setNotice(`${added} uploaded. ${rejected} skipped for size or empty content. ${failures[0]}`);
+    if (failures.length) setNotice(added ? `${added} uploaded. ${rejected} skipped. ${failures[0]}` : failures[0]);
     else setNotice(`${added} ${added === 1 ? "file uploaded" : "files uploaded"} to the shared library.${rejected ? ` ${rejected} file(s) skipped: empty or over 2 GB.` : ""}`);
   }
 
@@ -162,12 +168,12 @@ export default function Home() {
             <div className={`dropzone ${dragging ? "is-dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }} onDrop={onDrop}>
               <input ref={picker} className="file-input" type="file" multiple aria-label="Choose files to upload" onChange={(event: ChangeEvent<HTMLInputElement>) => void addFiles(event.target.files)} />
               <div className="upload-icon"><ArrowUpFromLine size={22} /></div>
-              <div className="drop-copy"><strong>{uploading ? `Uploading ${uploading}…` : dragging ? "Drop to add your files" : "Drop files to share with everyone"}</strong><span>{uploading ? "Your file is being sent to shared storage." : "Anyone can upload. Files become visible to all visitors."}</span></div>
-              <button className="browse-button" disabled={Boolean(uploading)} onClick={() => picker.current?.click()}>{uploading ? <span className="spinner"/> : null}{uploading ? "Uploading…" : "Browse files"}</button>
+              <div className="drop-copy"><strong>{uploading ? `Uploading ${uploading}…` : dragging ? "Drop to add your files" : storageReady === false ? "Shared storage needs to be connected" : "Drop files to share with everyone"}</strong><span>{uploading ? "Your file is being sent to shared storage." : storageReady === false ? "The site owner must configure R2 storage before uploads can work." : "Anyone can upload. Files become visible to all visitors."}</span></div>
+              <button className="browse-button" disabled={Boolean(uploading) || storageReady === false} onClick={() => picker.current?.click()}>{uploading ? <span className="spinner"/> : null}{uploading ? "Uploading…" : storageReady === false ? "Storage unavailable" : "Browse files"}</button>
               <span className="drop-hint">Any file type <i /> Up to 2 GB per file</span>
             </div>
             <div className="file-toolbar"><div className="list-title"><h2>{currentFolder ? "Folder contents" : "Shared files"}</h2><span className="file-total">{visibleFolders.length + visibleFiles.length}</span></div>{files.length + folders.length > 0 && <label className="search-field"><Search size={16}/><input aria-label="Search files and folders" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search shared files" /></label>}<button className="refresh-button" onClick={() => void refreshLibrary()} disabled={loading} aria-label="Refresh shared library"><Clock3 size={15}/><span>{loading ? "Refreshing…" : "Refresh"}</span></button></div>
-            {loading ? <div className="loading-state" role="status"><span className="spinner spinner-blue"/> Loading the public library…</div> : visibleFolders.length + visibleFiles.length === 0 ? <div className="empty-state"><div className="empty-graphic"><div className="empty-sheet sheet-back"/><div className="empty-sheet sheet-front"><File size={24}/></div><span className="empty-plus"><Plus size={13}/></span></div><h3>{query ? "No matches found" : "The library is ready"}</h3><p>{query ? "Try a different search, or clear your query." : "Upload a file or create a folder. Everyone who visits can see it."}</p><button className="empty-action" onClick={query ? () => setQuery("") : () => picker.current?.click()}>{query ? <X size={16}/> : <ArrowUpFromLine size={16}/>} {query ? "Clear search" : "Upload the first file"}</button></div> : <div className="file-list"><div className="list-header"><span>NAME</span><span>SIZE</span><span>ADDED</span><span>ACTIONS</span></div>{visibleFolders.map((item) => <div className="file-row folder-row" key={item.id}><button className="file-name folder-open" onClick={() => setFolderId(item.id)}><span className="file-type folder-type"><Folder size={19}/></span><span className="file-meta"><strong>{item.name}</strong><small>Folder · {files.filter((file) => file.folderId === item.id).length} files</small></span></button><span className="file-size">—</span><span className="file-date">Folder</span><span className="row-actions"><span className="folder-hint">Open folder <span aria-hidden="true">→</span></span></span></div>)}{visibleFiles.map((item) => <div className="file-row" key={item.id}><span className="file-name"><span className="file-type"><FileIcon name={item.name}/></span><span className="file-meta"><strong>{item.name}</strong><small>{item.contentType} · Public</small></span></span><span className="file-size">{formatSize(item.size)}</span><span className="file-date">{new Date(item.createdAt).toLocaleDateString()}</span><span className="row-actions"><button className={`copy-button ${copied === item.id ? "copied" : ""}`} onClick={() => void copyLink(item)} aria-label={`Copy public link for ${item.name}`}>{copied === item.id ? <Check size={15}/> : <Copy size={15}/>}<span>{copied === item.id ? "Copied" : "Copy link"}</span></button><a className="download-button" href={`/api/files/${item.id}/download`} target="_blank" rel="noreferrer" aria-label={`Open ${item.name} in browser`}><Eye size={16}/></a><a className="download-button" href={`/api/files/${item.id}/download?download=1`} aria-label={`Download ${item.name}`}><ArrowDownToLine size={17}/></a></span></div>)}</div>}
+            {loading ? <div className="loading-state" role="status"><span className="spinner spinner-blue"/> Loading the public library…</div> : visibleFolders.length + visibleFiles.length === 0 ? <div className="empty-state"><div className="empty-graphic"><div className="empty-sheet sheet-back"/><div className="empty-sheet sheet-front"><File size={24}/></div><span className="empty-plus"><Plus size={13}/></span></div><h3>{query ? "No matches found" : storageReady === false ? "Shared storage is not connected" : "The library is ready"}</h3><p>{query ? "Try a different search, or clear your query." : storageReady === false ? "The site owner must finish the R2 setup before anyone can upload shared files." : "Upload a file or create a folder. Everyone who visits can see it."}</p><button className="empty-action" disabled={storageReady === false} onClick={query ? () => setQuery("") : () => picker.current?.click()}>{query ? <X size={16}/> : <ArrowUpFromLine size={16}/>} {query ? "Clear search" : storageReady === false ? "Uploads unavailable" : "Upload the first file"}</button></div> : <div className="file-list"><div className="list-header"><span>NAME</span><span>SIZE</span><span>ADDED</span><span>ACTIONS</span></div>{visibleFolders.map((item) => <div className="file-row folder-row" key={item.id}><button className="file-name folder-open" onClick={() => setFolderId(item.id)}><span className="file-type folder-type"><Folder size={19}/></span><span className="file-meta"><strong>{item.name}</strong><small>Folder · {files.filter((file) => file.folderId === item.id).length} files</small></span></button><span className="file-size">—</span><span className="file-date">Folder</span><span className="row-actions"><span className="folder-hint">Open folder <span aria-hidden="true">→</span></span></span></div>)}{visibleFiles.map((item) => <div className="file-row" key={item.id}><span className="file-name"><span className="file-type"><FileIcon name={item.name}/></span><span className="file-meta"><strong>{item.name}</strong><small>{item.contentType} · Public</small></span></span><span className="file-size">{formatSize(item.size)}</span><span className="file-date">{new Date(item.createdAt).toLocaleDateString()}</span><span className="row-actions"><button className={`copy-button ${copied === item.id ? "copied" : ""}`} onClick={() => void copyLink(item)} aria-label={`Copy public link for ${item.name}`}>{copied === item.id ? <Check size={15}/> : <Copy size={15}/>}<span>{copied === item.id ? "Copied" : "Copy link"}</span></button><a className="download-button" href={`/api/files/${item.id}/download`} target="_blank" rel="noreferrer" aria-label={`Open ${item.name} in browser`}><Eye size={16}/></a><a className="download-button" href={`/api/files/${item.id}/download?download=1`} aria-label={`Download ${item.name}`}><ArrowDownToLine size={17}/></a></span></div>)}</div>}
             {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss message"><X size={14}/></button></div>}
             <footer className="footnote"><span><ShieldCheck size={14}/> Uploads are public and available to all visitors.</span><button onClick={() => setNotice("Never upload sensitive or private information to this public library.")} aria-label="Public sharing information"><MoreHorizontal size={16}/></button></footer>
           </div>

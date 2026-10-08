@@ -73,7 +73,10 @@ export default function Home() {
         const init = await fetch("/api/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type || "application/octet-stream", folderId }) });
         if (!init.ok) throw new Error(await responseError(init, "Upload could not start."));
         const upload = await init.json() as { id: string; uploadUrl: string; name: string; size: number; contentType: string; folderId: string | null };
-        const put = await fetch(upload.uploadUrl, { method: "PUT", headers: { "Content-Type": upload.contentType }, body: file });
+        const uploadUrl = new URL(upload.uploadUrl, window.location.origin);
+        uploadUrl.protocol = window.location.protocol;
+        uploadUrl.host = window.location.host;
+        const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": upload.contentType }, body: file });
         if (!put.ok) throw new Error(await responseError(put, "The file could not be saved on this server."));
         const finish = await fetch("/api/files", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: upload.id, name: upload.name, size: upload.size, contentType: upload.contentType, folderId: upload.folderId, ownerKey }) });
         if (!finish.ok) throw new Error(await responseError(finish, "Upload finished but could not be added to the public library."));

@@ -12,6 +12,6 @@ export async function POST(request: Request) {
   const id = crypto.randomUUID();
   try {
     pendingFilePath(id);
-    return Response.json({ id, uploadUrl: new URL(`/api/uploads/${id}/content`, request.url).toString(), ...parsed.data }, { status: 201 });
+    return Response.json({ id, uploadUrl: `/api/uploads/${id}/content`, ...parsed.data }, { status: 201 });
   } catch { return Response.json({ error: "Could not prepare this upload." }, { status: 500 }); }
 }

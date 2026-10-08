@@ -1,10 +1,10 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, Clock3, Copy, File, FileArchive, FileImage, FileText, Folder, FolderPlus, Link2, MoreHorizontal, Plus, Search, ShieldCheck, Trash2, X } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, Clock3, Copy, File, FileArchive, FileImage, FileText, Folder, FolderPlus, Link2, LockKeyhole, MoreHorizontal, Plus, Search, ShieldCheck, Trash2, UnlockKeyhole, X } from "lucide-react";
 
-type SharedFile = { id: string; file: File; url: string; added: string; folderId: string | null };
-type FolderItem = { id: string; name: string; parentId: string | null; created: number };
+type SharedFile = { id: string; file: File; url: string; added: string; folderId: string | null; password: string | null };
+type FolderItem = { id: string; name: string; parentId: string | null; created: number; password: string | null };
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
 
 function formatSize(bytes: number) {
@@ -43,7 +43,7 @@ export default function Home() {
       setBusy(false);
       return;
     }
-    setFiles((current) => [...accepted.map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), added: "Just now", folderId })), ...current]);
+    setFiles((current) => [...accepted.map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), added: "Just now", folderId, password: null })), ...current]);
     const details = [oversized.length ? `${oversized.length} exceeded the 2 GB limit` : "", empty.length ? `${empty.length} empty ${empty.length === 1 ? "file was" : "files were"} skipped` : ""].filter(Boolean).join("; ");
     setNotice(`${accepted.length} ${accepted.length === 1 ? "file added" : "files added"}${folderId ? ` to ${folders.find((item) => item.id === folderId)?.name ?? "folder"}` : ""}.${details ? ` ${details}.` : ""}`);
     setBusy(false);
@@ -57,6 +57,7 @@ export default function Home() {
   }
 
   async function copyLink(item: SharedFile) {
+    if (!verifyFileAccess(item)) return;
     const shareUrl = `${window.location.origin}/share/${item.id}`;
     try {
       await navigator.clipboard.writeText(shareUrl);
@@ -66,6 +67,72 @@ export default function Home() {
     } catch {
       setNotice("Clipboard access is blocked. Open your browser settings and try again.");
     }
+  }
+
+  function verifyPassword(label: string, password: string | null) {
+    if (!password) return true;
+    const entered = window.prompt(`Enter the password for ${label}`);
+    if (entered === password) return true;
+    if (entered !== null) setNotice("That password didn’t match. Try again.");
+    return false;
+  }
+
+  function verifyFileAccess(item: SharedFile) {
+    const chain: FolderItem[] = [];
+    let parent = folders.find((folder) => folder.id === item.folderId);
+    while (parent) {
+      chain.unshift(parent);
+      parent = folders.find((folder) => folder.id === parent?.parentId);
+    }
+    for (const folder of chain) if (!verifyPassword(`folder “${folder.name}”`, folder.password)) return false;
+    return verifyPassword(`file “${item.file.name}”`, item.password);
+  }
+
+  function openFolder(item: FolderItem) {
+    const chain: FolderItem[] = [];
+    let parent: FolderItem | undefined = item;
+    while (parent) {
+      chain.unshift(parent);
+      parent = folders.find((folder) => folder.id === parent?.parentId);
+    }
+    for (const folder of chain) if (!verifyPassword(`folder “${folder.name}”`, folder.password)) return;
+    setFolderId(item.id);
+  }
+
+  function toggleFilePassword(item: SharedFile) {
+    if (item.password) {
+      if (!verifyPassword(`file “${item.file.name}”`, item.password)) return;
+      setFiles((current) => current.map((file) => file.id === item.id ? { ...file, password: null } : file));
+      setNotice("File password removed.");
+      return;
+    }
+    const password = window.prompt(`Create a password for “${item.file.name}” (at least 4 characters)`);
+    if (password === null) return;
+    if (password.length < 4) { setNotice("Use a password with at least 4 characters."); return; }
+    setFiles((current) => current.map((file) => file.id === item.id ? { ...file, password } : file));
+    setNotice("File password enabled. Downloads and link copying now require it.");
+  }
+
+  function toggleFolderPassword(item: FolderItem) {
+    if (item.password) {
+      if (!verifyPassword(`folder “${item.name}”`, item.password)) return;
+      setFolders((current) => current.map((folder) => folder.id === item.id ? { ...folder, password: null } : folder));
+      setNotice("Folder password removed.");
+      return;
+    }
+    const password = window.prompt(`Create a password for folder “${item.name}” (at least 4 characters)`);
+    if (password === null) return;
+    if (password.length < 4) { setNotice("Use a password with at least 4 characters."); return; }
+    setFolders((current) => current.map((folder) => folder.id === item.id ? { ...folder, password } : folder));
+    setNotice("Folder password enabled. Opening it and accessing its files now requires it.");
+  }
+
+  function downloadFile(item: SharedFile) {
+    if (!verifyFileAccess(item)) return;
+    const anchor = document.createElement("a");
+    anchor.href = item.url;
+    anchor.download = item.file.name;
+    anchor.click();
   }
 
   const visibleFiles = files.filter(({ file, folderId: parent }) => parent === folderId && file.name.toLowerCase().includes(query.toLowerCase()));
@@ -85,7 +152,7 @@ export default function Home() {
       setNotice("A folder with that name already exists here.");
       return;
     }
-    setFolders((current) => [...current, { id: crypto.randomUUID(), name: name.trim(), parentId: folderId, created: Date.now() }]);
+    setFolders((current) => [...current, { id: crypto.randomUUID(), name: name.trim(), parentId: folderId, created: Date.now(), password: null }]);
     setNotice(`Folder “${name.trim()}” created.`);
   }
 
@@ -135,7 +202,7 @@ export default function Home() {
 
           <div className="file-toolbar"><div className="list-title"><h2>{currentFolder ? "Folder contents" : "Your files"}</h2><span className="file-total">{visibleFolders.length + visibleFiles.length}</span></div>{files.length + folders.length > 0 && <label className="search-field"><Search size={16}/><input aria-label="Search files and folders" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search files and folders" /></label>}</div>
 
-          {visibleFolders.length + visibleFiles.length === 0 ? <div className="empty-state"><div className="empty-graphic"><div className="empty-sheet sheet-back"/><div className="empty-sheet sheet-front"><File size={24}/></div><span className="empty-plus"><Plus size={13}/></span></div><h3>{query ? "No matches found" : "Nothing here just yet"}</h3><p>{query ? "Try a different search, or clear your query." : "Create a folder or add a file to get started."}</p><button className="empty-action" onClick={query ? () => setQuery("") : createFolder}>{query ? <X size={16}/> : <FolderPlus size={16}/>} {query ? "Clear search" : "Create a folder"}</button></div> : <div className="file-list"><div className="list-header"><span>NAME</span><span>SIZE</span><span>ADDED</span><span>ACTIONS</span></div>{visibleFolders.map((item) => <div className="file-row folder-row" key={item.id}><button className="file-name folder-open" onClick={() => setFolderId(item.id)}><span className="file-type folder-type"><Folder size={19}/></span><span className="file-meta"><strong>{item.name}</strong><small>Folder · {files.filter((file) => file.folderId === item.id).length} files</small></span></button><span className="file-size">—</span><span className="file-date">Folder</span><span className="row-actions"><button className="download-button" onClick={() => deleteFolder(item)} aria-label={`Delete folder ${item.name}`}><Trash2 size={16}/></button></span></div>)}{visibleFiles.map((item) => <div className="file-row" key={item.id}><span className="file-name"><span className="file-type"><FileIcon name={item.file.name}/></span><span className="file-meta"><strong>{item.file.name}</strong><small>Ready to share</small></span></span><span className="file-size">{formatSize(item.file.size)}</span><span className="file-date">{item.added}</span><span className="row-actions"><button className={`copy-button ${copied === item.id ? "copied" : ""}`} onClick={() => copyLink(item)} aria-label={`Copy share link for ${item.file.name}`}>{copied === item.id ? <Check size={15}/> : <Copy size={15}/>}<span>{copied === item.id ? "Copied" : "Copy link"}</span></button><a className="download-button" href={item.url} download={item.file.name} aria-label={`Download ${item.file.name}`}><ArrowDownToLine size={17}/></a><button className="download-button" onClick={() => deleteFile(item)} aria-label={`Delete ${item.file.name}`}><Trash2 size={16}/></button></span></div>)}</div>}
+          {visibleFolders.length + visibleFiles.length === 0 ? <div className="empty-state"><div className="empty-graphic"><div className="empty-sheet sheet-back"/><div className="empty-sheet sheet-front"><File size={24}/></div><span className="empty-plus"><Plus size={13}/></span></div><h3>{query ? "No matches found" : "Nothing here just yet"}</h3><p>{query ? "Try a different search, or clear your query." : "Create a folder or add a file to get started."}</p><button className="empty-action" onClick={query ? () => setQuery("") : createFolder}>{query ? <X size={16}/> : <FolderPlus size={16}/>} {query ? "Clear search" : "Create a folder"}</button></div> : <div className="file-list"><div className="list-header"><span>NAME</span><span>SIZE</span><span>ADDED</span><span>ACTIONS</span></div>{visibleFolders.map((item) => <div className="file-row folder-row" key={item.id}><button className="file-name folder-open" onClick={() => openFolder(item)}><span className="file-type folder-type"><Folder size={19}/></span><span className="file-meta"><strong>{item.password && <LockKeyhole size={12} className="inline-lock"/>}{item.name}</strong><small>Folder · {files.filter((file) => file.folderId === item.id).length} files</small></span></button><span className="file-size">—</span><span className="file-date">Folder</span><span className="row-actions"><button className="download-button" onClick={() => toggleFolderPassword(item)} aria-label={`${item.password ? "Remove" : "Add"} password for folder ${item.name}`}>{item.password ? <LockKeyhole size={15}/> : <UnlockKeyhole size={15}/>}</button><button className="download-button" onClick={() => deleteFolder(item)} aria-label={`Delete folder ${item.name}`}><Trash2 size={16}/></button></span></div>)}{visibleFiles.map((item) => <div className="file-row" key={item.id}><span className="file-name"><span className="file-type"><FileIcon name={item.file.name}/></span><span className="file-meta"><strong>{item.password && <LockKeyhole size={12} className="inline-lock"/>}{item.file.name}</strong><small>{item.password ? "Password required" : "Ready to share"}</small></span></span><span className="file-size">{formatSize(item.file.size)}</span><span className="file-date">{item.added}</span><span className="row-actions"><button className={`copy-button ${copied === item.id ? "copied" : ""}`} onClick={() => copyLink(item)} aria-label={`Copy share link for ${item.file.name}`}>{copied === item.id ? <Check size={15}/> : <Copy size={15}/>}<span>{copied === item.id ? "Copied" : "Copy link"}</span></button><button className="download-button" onClick={() => downloadFile(item)} aria-label={`Download ${item.file.name}`}><ArrowDownToLine size={17}/></button><button className="download-button" onClick={() => toggleFilePassword(item)} aria-label={`${item.password ? "Remove" : "Add"} password for ${item.file.name}`}>{item.password ? <LockKeyhole size={15}/> : <UnlockKeyhole size={15}/>}</button><button className="download-button" onClick={() => deleteFile(item)} aria-label={`Delete ${item.file.name}`}><Trash2 size={16}/></button></span></div>)}</div>}
           {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss message"><X size={14}/></button></div>}
           <footer className="footnote"><span><ShieldCheck size={14}/> Files are available in this browser session.</span><button onClick={() => setNotice("Files up to 2 GB can be added. Cloud sharing requires connecting a storage service.")}><MoreHorizontal size={16} aria-label="More information"/></button></footer>
         </div>

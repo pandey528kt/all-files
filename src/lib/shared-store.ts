@@ -7,15 +7,17 @@ import { promisify } from "node:util";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
+import { tmpdir } from "node:os";
 
 export type StoredFolder = { id: string; name: string; parentId: string | null; createdAt: string; passwordHash: string | null; ownerHash: string; recoveryHash: string | null };
 export type StoredFile = { id: string; name: string; size: number; contentType: string; folderId: string | null; createdAt: string; passwordHash: string | null; ownerHash: string; recoveryHash: string | null };
 export type Catalog = { folders: StoredFolder[]; files: StoredFile[] };
 const maxBytes = 2 * 1024 * 1024 * 1024;
-const root = process.env.FOLIO_DATA_DIR || join(process.cwd(), ".data", "public-library");
-const catalogPath = join(root, "catalog.json");
-const pendingPath = join(root, "pending");
-const blobsPath = join(root, "blobs");
+const configuredRoot = process.env.FOLIO_DATA_DIR;
+const fallbackRoot = join(tmpdir(), "folio-public-library");
+let root = configuredRoot || join(process.cwd(), ".data", "public-library");
+let rootReady = false;
+let fallbackSelected = false;
 const scrypt = promisify(scryptCallback);
 const tokenSecret = process.env.FILE_ACCESS_SECRET || randomBytes(32).toString("hex");
 let writeQueue: Promise<unknown> = Promise.resolve();
@@ -23,16 +25,38 @@ let writeQueue: Promise<unknown> = Promise.resolve();
 export function newSecret() { return randomBytes(24).toString("base64url"); }
 export function blobPath(id: string) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Invalid file id.");
-  return join(blobsPath, `${id}.blob`);
+  return join(root, "blobs", `${id}.blob`);
 }
 export function pendingFilePath(id: string) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Invalid upload id.");
-  return join(pendingPath, `${id}.upload`);
+  return join(root, "pending", `${id}.upload`);
+}
+
+async function ensureWritableRoot() {
+  if (rootReady) return;
+  const probe = join(root, `.write-check-${process.pid}`);
+  try {
+    await mkdir(root, { recursive: true });
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(probe, "ok", { flag: "w", mode: 0o600 });
+    await rm(probe, { force: true });
+    rootReady = true;
+  } catch (error) {
+    await rm(probe, { force: true }).catch(() => undefined);
+    if (configuredRoot || fallbackSelected) throw error;
+    root = fallbackRoot;
+    fallbackSelected = true;
+    await mkdir(root, { recursive: true });
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(root, `.write-check-${process.pid}`), "ok", { flag: "w", mode: 0o600 });
+    await rm(join(root, `.write-check-${process.pid}`), { force: true });
+    rootReady = true;
+  }
 }
 
 export async function readCatalog(): Promise<Catalog> {
-  await mkdir(root, { recursive: true });
-  try { return JSON.parse(await readFile(catalogPath, "utf8")) as Catalog; }
+  await ensureWritableRoot();
+  try { return JSON.parse(await readFile(join(root, "catalog.json"), "utf8")) as Catalog; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { folders: [], files: [] }; throw error; }
 }
 
@@ -40,7 +64,8 @@ export async function updateCatalog<T>(update: (catalog: Catalog) => Promise<T> 
   const run = writeQueue.then(async () => {
     const catalog = await readCatalog();
     const result = await update(catalog);
-    await mkdir(root, { recursive: true });
+    await ensureWritableRoot();
+    const catalogPath = join(root, "catalog.json");
     const temp = `${catalogPath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
     await writeFileAtomic(temp, JSON.stringify(catalog));
     await rename(temp, catalogPath);
@@ -56,7 +81,8 @@ async function writeFileAtomic(path: string, content: string) {
 }
 
 export async function saveUpload(id: string, body: ReadableStream<Uint8Array>) {
-  await mkdir(pendingPath, { recursive: true });
+  await ensureWritableRoot();
+  await mkdir(join(root, "pending"), { recursive: true });
   let bytes = 0;
   const limiter = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
@@ -71,7 +97,8 @@ export async function saveUpload(id: string, body: ReadableStream<Uint8Array>) {
 }
 
 export async function finishUpload(id: string, expectedSize: number) {
-  await mkdir(blobsPath, { recursive: true });
+  await ensureWritableRoot();
+  await mkdir(join(root, "blobs"), { recursive: true });
   const pending = pendingFilePath(id);
   const actual = (await stat(pending)).size;
   if (actual !== expectedSize) throw new Error("UPLOAD_SIZE_MISMATCH");

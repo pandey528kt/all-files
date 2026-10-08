@@ -3,8 +3,8 @@
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
 import { ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, Clock3, Copy, Eye, File, FileArchive, FileImage, FileText, Folder, FolderPlus, Link2, LockKeyhole, MoreHorizontal, Plus, Search, ShieldCheck, Trash2, UnlockKeyhole, X } from "lucide-react";
 
-type SharedFile = { id: string; file: File; url: string; added: string; folderId: string | null; password: string | null };
-type FolderItem = { id: string; name: string; parentId: string | null; created: number; password: string | null };
+type SharedFile = { id: string; file: File; url: string; added: string; folderId: string | null; password: string | null; recoveryKey: string | null };
+type FolderItem = { id: string; name: string; parentId: string | null; created: number; password: string | null; recoveryKey: string | null };
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
 
 function formatSize(bytes: number) {
@@ -43,7 +43,7 @@ export default function Home() {
       setBusy(false);
       return;
     }
-    setFiles((current) => [...accepted.map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), added: "Just now", folderId, password: null })), ...current]);
+    setFiles((current) => [...accepted.map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), added: "Just now", folderId, password: null, recoveryKey: null })), ...current]);
     const details = [oversized.length ? `${oversized.length} exceeded the 2 GB limit` : "", empty.length ? `${empty.length} empty ${empty.length === 1 ? "file was" : "files were"} skipped` : ""].filter(Boolean).join("; ");
     setNotice(`${accepted.length} ${accepted.length === 1 ? "file added" : "files added"}${folderId ? ` to ${folders.find((item) => item.id === folderId)?.name ?? "folder"}` : ""}.${details ? ` ${details}.` : ""}`);
     setBusy(false);
@@ -69,12 +69,33 @@ export default function Home() {
     }
   }
 
-  function verifyPassword(label: string, password: string | null) {
+  function verifyPassword(label: string, password: string | null, recoveryKey: string | null, onReset: (newPassword: string) => void) {
     if (!password) return true;
     const entered = window.prompt(`Enter the password for ${label}`);
     if (entered === password) return true;
+    if (entered !== null && window.confirm("Password didn’t match. Forgot it? Use the owner recovery code to reset it.")) {
+      const recoveryEntry = window.prompt("Enter the recovery code saved by the file or folder owner");
+      if (!recoveryEntry) return false;
+      if (!recoveryKey || recoveryEntry.trim().toLowerCase() !== recoveryKey.toLowerCase()) {
+        setNotice("That recovery code is incorrect. Only the owner recovery code can reset this password.");
+        return false;
+      }
+      const newPassword = window.prompt("Set a new password (at least 4 characters)");
+      if (!newPassword || newPassword.length < 4) {
+        setNotice("Password reset cancelled. Use at least 4 characters.");
+        return false;
+      }
+      onReset(newPassword);
+      setNotice("Password reset. Enter your new password to continue.");
+      return false;
+    }
     if (entered !== null) setNotice("That password didn’t match. Try again.");
     return false;
+  }
+
+  function createRecoveryKey() {
+    const bytes = crypto.getRandomValues(new Uint8Array(12));
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   }
 
   function verifyFileAccess(item: SharedFile) {
@@ -84,8 +105,8 @@ export default function Home() {
       chain.unshift(parent);
       parent = folders.find((folder) => folder.id === parent?.parentId);
     }
-    for (const folder of chain) if (!verifyPassword(`folder “${folder.name}”`, folder.password)) return false;
-    return verifyPassword(`file “${item.file.name}”`, item.password);
+    for (const folder of chain) if (!verifyPassword(`folder “${folder.name}”`, folder.password, folder.recoveryKey, (password) => setFolders((current) => current.map((entry) => entry.id === folder.id ? { ...entry, password } : entry)))) return false;
+    return verifyPassword(`file “${item.file.name}”`, item.password, item.recoveryKey, (password) => setFiles((current) => current.map((entry) => entry.id === item.id ? { ...entry, password } : entry)));
   }
 
   function openFolder(item: FolderItem) {
@@ -95,13 +116,13 @@ export default function Home() {
       chain.unshift(parent);
       parent = folders.find((folder) => folder.id === parent?.parentId);
     }
-    for (const folder of chain) if (!verifyPassword(`folder “${folder.name}”`, folder.password)) return;
+    for (const folder of chain) if (!verifyPassword(`folder “${folder.name}”`, folder.password, folder.recoveryKey, (password) => setFolders((current) => current.map((entry) => entry.id === folder.id ? { ...entry, password } : entry)))) return;
     setFolderId(item.id);
   }
 
   function toggleFilePassword(item: SharedFile) {
     if (item.password) {
-      if (!verifyPassword(`file “${item.file.name}”`, item.password)) return;
+      if (!verifyPassword(`file “${item.file.name}”`, item.password, item.recoveryKey, (password) => setFiles((current) => current.map((entry) => entry.id === item.id ? { ...entry, password } : entry)))) return;
       if (!window.confirm(`Remove the password requirement from “${item.file.name}”?`)) return;
       setFiles((current) => current.map((file) => file.id === item.id ? { ...file, password: null } : file));
       setNotice("File password removed.");
@@ -110,13 +131,15 @@ export default function Home() {
     const password = window.prompt(`Create a password for “${item.file.name}” (at least 4 characters)`);
     if (password === null) return;
     if (password.length < 4) { setNotice("Use a password with at least 4 characters."); return; }
-    setFiles((current) => current.map((file) => file.id === item.id ? { ...file, password } : file));
-    setNotice("File password enabled. Downloads and link copying now require it.");
+    const recoveryKey = createRecoveryKey();
+    setFiles((current) => current.map((file) => file.id === item.id ? { ...file, password, recoveryKey } : file));
+    window.alert(`Save this owner recovery code somewhere safe. It is required to reset the password for “${item.file.name}”.\n\n${recoveryKey}`);
+    setNotice("File password enabled. Keep the owner recovery code safe; it cannot be shown again.");
   }
 
   function toggleFolderPassword(item: FolderItem) {
     if (item.password) {
-      if (!verifyPassword(`folder “${item.name}”`, item.password)) return;
+      if (!verifyPassword(`folder “${item.name}”`, item.password, item.recoveryKey, (password) => setFolders((current) => current.map((entry) => entry.id === item.id ? { ...entry, password } : entry)))) return;
       if (!window.confirm(`Remove the password requirement from folder “${item.name}”?`)) return;
       setFolders((current) => current.map((folder) => folder.id === item.id ? { ...folder, password: null } : folder));
       setNotice("Folder password removed.");
@@ -125,8 +148,10 @@ export default function Home() {
     const password = window.prompt(`Create a password for folder “${item.name}” (at least 4 characters)`);
     if (password === null) return;
     if (password.length < 4) { setNotice("Use a password with at least 4 characters."); return; }
-    setFolders((current) => current.map((folder) => folder.id === item.id ? { ...folder, password } : folder));
-    setNotice("Folder password enabled. Opening it and accessing its files now requires it.");
+    const recoveryKey = createRecoveryKey();
+    setFolders((current) => current.map((folder) => folder.id === item.id ? { ...folder, password, recoveryKey } : folder));
+    window.alert(`Save this owner recovery code somewhere safe. It is required to reset the password for folder “${item.name}”.\n\n${recoveryKey}`);
+    setNotice("Folder password enabled. Keep the owner recovery code safe; it cannot be shown again.");
   }
 
   function downloadFile(item: SharedFile) {
@@ -160,7 +185,7 @@ export default function Home() {
       setNotice("A folder with that name already exists here.");
       return;
     }
-    setFolders((current) => [...current, { id: crypto.randomUUID(), name: name.trim(), parentId: folderId, created: Date.now(), password: null }]);
+    setFolders((current) => [...current, { id: crypto.randomUUID(), name: name.trim(), parentId: folderId, created: Date.now(), password: null, recoveryKey: null }]);
     setNotice(`Folder “${name.trim()}” created.`);
   }
 

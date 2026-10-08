@@ -243,8 +243,7 @@ export default function Home() {
       </section>
     </main>
     <footer className="maker-ticker" aria-label="Made by Kartikey">
-      <div className="ticker-lane ticker-forward" aria-hidden="true"><div className="ticker-track">{Array.from({ length: 8 }, (_, index) => <span key={index}>MADE BY KARTIKEY <i>+</i></span>)}</div></div>
-      <div className="ticker-lane ticker-reverse" aria-hidden="true"><div className="ticker-track">{Array.from({ length: 8 }, (_, index) => <span key={index}>MADE BY KARTIKEY <i>+</i></span>)}</div></div>
+      <div className="ticker-lane" aria-hidden="true"><div className="ticker-track">{Array.from({ length: 14 }, (_, index) => <span key={index}>MADE BY KARTIKEY <i>+</i></span>)}</div></div>
     </footer>
     </div>
   );

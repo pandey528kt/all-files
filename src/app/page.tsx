@@ -101,6 +101,7 @@ export default function Home() {
 
   function toggleFilePassword(item: SharedFile) {
     if (item.password) {
+      if (!verifyPassword(`file “${item.file.name}”`, item.password)) return;
       if (!window.confirm(`Remove the password requirement from “${item.file.name}”?`)) return;
       setFiles((current) => current.map((file) => file.id === item.id ? { ...file, password: null } : file));
       setNotice("File password removed.");
@@ -115,6 +116,7 @@ export default function Home() {
 
   function toggleFolderPassword(item: FolderItem) {
     if (item.password) {
+      if (!verifyPassword(`folder “${item.name}”`, item.password)) return;
       if (!window.confirm(`Remove the password requirement from folder “${item.name}”?`)) return;
       setFolders((current) => current.map((folder) => folder.id === item.id ? { ...folder, password: null } : folder));
       setNotice("Folder password removed.");

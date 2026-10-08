@@ -211,6 +211,7 @@ export default function Home() {
   }
 
   return (
+    <div className="site-shell">
     <main className="workspace">
       <aside className="sidebar">
         <a className="brand" href="#home" aria-label="Folio home"><span className="brand-mark"><Link2 size={20} strokeWidth={2.4} /></span><span>folio<span className="brand-dot">.</span></span></a>
@@ -241,5 +242,10 @@ export default function Home() {
         </div>
       </section>
     </main>
+    <footer className="maker-ticker" aria-label="Made by Kartikey">
+      <div className="ticker-lane ticker-forward" aria-hidden="true"><div className="ticker-track">{Array.from({ length: 8 }, (_, index) => <span key={index}>MADE BY KARTIKEY <i>+</i></span>)}</div></div>
+      <div className="ticker-lane ticker-reverse" aria-hidden="true"><div className="ticker-track">{Array.from({ length: 8 }, (_, index) => <span key={index}>MADE BY KARTIKEY <i>+</i></span>)}</div></div>
+    </footer>
+    </div>
   );
 }

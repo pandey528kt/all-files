@@ -15,6 +15,7 @@ export const files = pgTable("files", {
   size: bigint("size", { mode: "number" }).notNull(),
   contentType: text("content_type").notNull(),
   objectKey: text("object_key").notNull().unique(),
+  storageBackend: text("storage_backend").notNull().default("local"),
   folderId: text("folder_id").references(() => folders.id, { onDelete: "cascade" }),
   passwordHash: text("password_hash"),
   recoveryCodeHash: text("recovery_code_hash"),

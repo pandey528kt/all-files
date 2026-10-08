@@ -86,13 +86,13 @@ export default function Home() {
           body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type || "application/octet-stream", folderId }),
         });
         if (!initResponse.ok) throw new Error(await responseError(initResponse, "Upload could not start."));
-        const upload = await initResponse.json() as { id: string; uploadUrl: string; name: string; size: number; contentType: string; folderId: string | null };
+        const upload = await initResponse.json() as { id: string; uploadUrl: string; name: string; size: number; contentType: string; folderId: string | null; storageMode: "local" | "r2" };
         const objectResponse = await fetch(upload.uploadUrl, { method: "PUT", headers: { "Content-Type": upload.contentType }, body: file });
         if (!objectResponse.ok) throw new Error("Storage rejected the upload. Check the bucket CORS settings and try again.");
         const saveResponse = await fetch("/api/files", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: upload.id, name: upload.name, size: upload.size, contentType: upload.contentType, folderId: upload.folderId }),
+          body: JSON.stringify({ id: upload.id, name: upload.name, size: upload.size, contentType: upload.contentType, folderId: upload.folderId, storageBackend: upload.storageMode }),
         });
         if (!saveResponse.ok) throw new Error(await responseError(saveResponse, "Upload finished but could not be added to the library."));
         added += 1;

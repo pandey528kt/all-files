@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { files, folders } from "@/lib/schema";
 import { getStorage } from "@/lib/r2";
+import { localObjectPath } from "@/lib/local-storage";
 import { eq } from "drizzle-orm";
 
 const maxFileSize = 2 * 1024 * 1024 * 1024;
@@ -25,10 +26,16 @@ export async function POST(request: Request) {
     if (folderId && !(await db.query.folders.findFirst({ where: eq(folders.id, folderId), columns: { id: true } }))) return Response.json({ error: "The destination folder no longer exists." }, { status: 404 });
     const id = crypto.randomUUID();
     const objectKey = `uploads/${id}`;
-    const { client, bucket } = getStorage();
-    const command = new PutObjectCommand({ Bucket: bucket, Key: objectKey, ContentType: contentType });
-    const uploadUrl = await getSignedUrl(client, command, { expiresIn: 600 });
-    return Response.json({ id, objectKey, uploadUrl, name, size, contentType, folderId: folderId ?? null }, { status: 201 });
+    const hasR2 = Boolean(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET_NAME);
+    if (hasR2) {
+      const { client, bucket } = getStorage();
+      const command = new PutObjectCommand({ Bucket: bucket, Key: objectKey, ContentType: contentType });
+      const uploadUrl = await getSignedUrl(client, command, { expiresIn: 600 });
+      return Response.json({ id, objectKey, uploadUrl, name, size, contentType, folderId: folderId ?? null, storageMode: "r2" }, { status: 201 });
+    }
+    const uploadUrl = new URL(`/api/uploads/${id}/content`, request.url).toString();
+    localObjectPath(id);
+    return Response.json({ id, objectKey, uploadUrl, name, size, contentType, folderId: folderId ?? null, storageMode: "local" }, { status: 201 });
   } catch {
     return Response.json({ error: "File storage is not configured yet. Add the R2 server environment variables and retry." }, { status: 503 });
   }

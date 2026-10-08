@@ -1,1 +1,0 @@
-ALTER TABLE "files" ADD COLUMN "storage_backend" text DEFAULT 'local' NOT NULL;

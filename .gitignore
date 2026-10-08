@@ -63,7 +63,6 @@ prisma/*.db
 prisma/*.db-journal
 *.sqlite
 *.sqlite3
-/.data/
 
 # IDE - VSCode
 .vscode/*

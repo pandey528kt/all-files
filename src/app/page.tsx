@@ -5,6 +5,7 @@ import { ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, Clock3, Copy, Fil
 
 type SharedFile = { id: string; file: File; url: string; added: string; folderId: string | null };
 type FolderItem = { id: string; name: string; parentId: string | null; created: number };
+const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
 
 function formatSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -33,18 +34,20 @@ export default function Home() {
   function addFiles(incoming: FileList | null) {
     if (!incoming?.length) return;
     setBusy(true);
-    const accepted = Array.from(incoming).filter((file) => file.size > 0);
+    const selected = Array.from(incoming);
+    const accepted = selected.filter((file) => file.size > 0 && file.size <= MAX_FILE_SIZE);
+    const oversized = selected.filter((file) => file.size > MAX_FILE_SIZE);
+    const empty = selected.filter((file) => file.size === 0);
     if (!accepted.length) {
-      setNotice("Those files are empty. Choose a different file to share.");
+      setNotice(oversized.length ? `Files must be 2 GB or smaller. ${oversized.map((file) => file.name).join(", ")} was not added.` : "Those files are empty. Choose a different file to share.");
       setBusy(false);
       return;
     }
-    setTimeout(() => {
-      setFiles((current) => [...accepted.map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), added: "Just now", folderId })), ...current]);
-      setNotice(`${accepted.length} ${accepted.length === 1 ? "file is" : "files are"} ready to share.`);
-      setBusy(false);
-      if (picker.current) picker.current.value = "";
-    }, 350);
+    setFiles((current) => [...accepted.map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), added: "Just now", folderId })), ...current]);
+    const details = [oversized.length ? `${oversized.length} exceeded the 2 GB limit` : "", empty.length ? `${empty.length} empty ${empty.length === 1 ? "file was" : "files were"} skipped` : ""].filter(Boolean).join("; ");
+    setNotice(`${accepted.length} ${accepted.length === 1 ? "file added" : "files added"}${folderId ? ` to ${folders.find((item) => item.id === folderId)?.name ?? "folder"}` : ""}.${details ? ` ${details}.` : ""}`);
+    setBusy(false);
+    if (picker.current) picker.current.value = "";
   }
 
   function onDrop(event: DragEvent<HTMLDivElement>) {
@@ -68,6 +71,12 @@ export default function Home() {
   const visibleFiles = files.filter(({ file, folderId: parent }) => parent === folderId && file.name.toLowerCase().includes(query.toLowerCase()));
   const visibleFolders = folders.filter((item) => item.parentId === folderId && item.name.toLowerCase().includes(query.toLowerCase()));
   const currentFolder = folders.find((item) => item.id === folderId);
+  const breadcrumbs: FolderItem[] = [];
+  let breadcrumbFolder = currentFolder;
+  while (breadcrumbFolder) {
+    breadcrumbs.unshift(breadcrumbFolder);
+    breadcrumbFolder = folders.find((item) => item.id === breadcrumbFolder?.parentId);
+  }
 
   function createFolder() {
     const name = window.prompt("Name your new folder");
@@ -112,7 +121,7 @@ export default function Home() {
       </aside>
 
       <section className="main-panel" id="home">
-        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <button onClick={() => setFolderId(null)}>All files</button>{currentFolder && <><span>/</span><strong>{currentFolder.name}</strong></>}</div><div className="top-actions"><span className="secure-note"><ShieldCheck size={15} /> Private by default</span><button className="upload-top" onClick={createFolder}><FolderPlus size={16} /> New folder</button><button className="upload-top" onClick={() => picker.current?.click()}><Plus size={17} /> Upload files</button></div></header>
+        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <button onClick={() => setFolderId(null)}>All files</button>{breadcrumbs.map((item, index) => <span key={item.id}><span>/</span>{index === breadcrumbs.length - 1 ? <strong>{item.name}</strong> : <button onClick={() => setFolderId(item.id)}>{item.name}</button>}</span>)}</div><div className="top-actions"><span className="secure-note"><ShieldCheck size={15} /> Private by default</span><button className="upload-top" onClick={createFolder}><FolderPlus size={16} /> New folder</button><button className="upload-top" onClick={() => picker.current?.click()}><Plus size={17} /> Upload files</button></div></header>
         <div className="content">
           <div className="page-heading"><div><div className="eyebrow">YOUR SPACE</div><h1>{currentFolder?.name ?? "All files"}</h1><p className="subtitle">Organize, keep, and share the things that matter.</p></div><div className="heading-decoration" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><span><Link2 size={24}/></span></div></div>
 
@@ -121,14 +130,14 @@ export default function Home() {
             <div className="upload-icon"><ArrowUpFromLine size={22} /></div>
             <div className="drop-copy"><strong>{busy ? "Getting your files ready…" : dragging ? "Drop to add your files" : "Drop files here to share"}</strong><span>or choose files from your device</span></div>
             <button className="browse-button" disabled={busy} onClick={() => picker.current?.click()}>{busy ? <span className="spinner"/> : null}{busy ? "Preparing…" : "Browse files"}</button>
-            <span className="drop-hint">Any file type <i /> Stored on this device</span>
+            <span className="drop-hint">Any file type <i /> Up to 2 GB per file</span>
           </div>
 
           <div className="file-toolbar"><div className="list-title"><h2>{currentFolder ? "Folder contents" : "Your files"}</h2><span className="file-total">{visibleFolders.length + visibleFiles.length}</span></div>{files.length + folders.length > 0 && <label className="search-field"><Search size={16}/><input aria-label="Search files and folders" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search files and folders" /></label>}</div>
 
           {visibleFolders.length + visibleFiles.length === 0 ? <div className="empty-state"><div className="empty-graphic"><div className="empty-sheet sheet-back"/><div className="empty-sheet sheet-front"><File size={24}/></div><span className="empty-plus"><Plus size={13}/></span></div><h3>{query ? "No matches found" : "Nothing here just yet"}</h3><p>{query ? "Try a different search, or clear your query." : "Create a folder or add a file to get started."}</p><button className="empty-action" onClick={query ? () => setQuery("") : createFolder}>{query ? <X size={16}/> : <FolderPlus size={16}/>} {query ? "Clear search" : "Create a folder"}</button></div> : <div className="file-list"><div className="list-header"><span>NAME</span><span>SIZE</span><span>ADDED</span><span>ACTIONS</span></div>{visibleFolders.map((item) => <div className="file-row folder-row" key={item.id}><button className="file-name folder-open" onClick={() => setFolderId(item.id)}><span className="file-type folder-type"><Folder size={19}/></span><span className="file-meta"><strong>{item.name}</strong><small>Folder · {files.filter((file) => file.folderId === item.id).length} files</small></span></button><span className="file-size">—</span><span className="file-date">Folder</span><span className="row-actions"><button className="download-button" onClick={() => deleteFolder(item)} aria-label={`Delete folder ${item.name}`}><Trash2 size={16}/></button></span></div>)}{visibleFiles.map((item) => <div className="file-row" key={item.id}><span className="file-name"><span className="file-type"><FileIcon name={item.file.name}/></span><span className="file-meta"><strong>{item.file.name}</strong><small>Ready to share</small></span></span><span className="file-size">{formatSize(item.file.size)}</span><span className="file-date">{item.added}</span><span className="row-actions"><button className={`copy-button ${copied === item.id ? "copied" : ""}`} onClick={() => copyLink(item)} aria-label={`Copy share link for ${item.file.name}`}>{copied === item.id ? <Check size={15}/> : <Copy size={15}/>}<span>{copied === item.id ? "Copied" : "Copy link"}</span></button><a className="download-button" href={item.url} download={item.file.name} aria-label={`Download ${item.file.name}`}><ArrowDownToLine size={17}/></a><button className="download-button" onClick={() => deleteFile(item)} aria-label={`Delete ${item.file.name}`}><Trash2 size={16}/></button></span></div>)}</div>}
           {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss message"><X size={14}/></button></div>}
-          <footer className="footnote"><span><ShieldCheck size={14}/> Files stay in this browser session.</span><button onClick={() => setNotice("Upload a file, then copy its link to share.")}><MoreHorizontal size={16} aria-label="More information"/></button></footer>
+          <footer className="footnote"><span><ShieldCheck size={14}/> Files are available in this browser session.</span><button onClick={() => setNotice("Files up to 2 GB can be added. Cloud sharing requires connecting a storage service.")}><MoreHorizontal size={16} aria-label="More information"/></button></footer>
         </div>
       </section>
     </main>
